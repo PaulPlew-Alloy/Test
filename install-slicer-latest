@@ -1,0 +1,90 @@
+#! /usr/bin/env bash
+
+ENV_FILE=$HOME/.alloy_gh_token
+if [ ! -e $ENV_FILE ]
+then
+    printf "Access token not found at: $ENV_FILE\n"
+    exit 1
+fi
+
+TOKEN=$(cat $ENV_FILE)
+
+dpkg -l | grep -q slicer && slicer=true || slicer=false
+
+if $slicer
+then
+    printf "Continuing will uninstall the slicer do you want to continue? y/n "
+    read uninstall
+
+    if [[ -z $uninstall && $uninstall != y ]]
+    then
+        printf "exiting.\n"
+        exit 2
+    fi
+
+    printf "Uninstalling slicer.\n\n"
+    sudo dpkg -r Slicer
+    printf "Uninstall successful.\n"
+fi
+
+
+printf "Reading response code please wait\n"
+# see if code has the right permissions
+CODE=$(curl \
+    -I -s \
+    --request GET\
+    --url "https://api.github.com/repos/alloy-enterprises/slicer/releases/latest" \
+    --header "Accept: application/vnd.github+json" \
+    --header "Authorization: Bearer $TOKEN" \
+    | head -n 1 | cut -d$' ' -f2)
+
+if [ $CODE != 200 ]
+then
+    curl \
+        --request GET \
+        --url "https://api.github.com/repos/alloy-enterprises/slicer/releases/latest" \
+        --header "Accept: application/vnd.github+json" \
+        --header "Authorization: Bearer $TOKEN" | jq -r '.message'
+
+    exit 1
+fi
+printf "Access Token OK.\n"
+
+RESPONSE=$(curl \
+    --silent \
+    --request GET \
+    --url "https://api.github.com/repos/alloy-enterprises/slicer/releases/latest" \
+    --header "Accept: application/vnd.github+json" \
+    --header "Authorization: Bearer $TOKEN")
+
+ALL_ASSETS=$(jq -c '.assets[]' <<< $RESPONSE)
+
+for ASSET in $ALL_ASSETS
+do
+    name=$(jq -r '.name' <<< $ASSET)
+    url=$(jq -r '.url' <<< $ASSET)
+
+    if [ $name = *.deb ]
+    then
+        SLICER_NAME=$name
+        printf "Downloading $name to /tmp/$name\n"
+
+        curl \
+            --location \
+            --progress-bar \
+            --output "/tmp/$name" \
+            --request GET \
+            --url $url \
+            --header "Accept: application/octet-stream" \
+            --header "Authorization: Bearer $TOKEN"
+    fi
+done
+
+if [ ! -e /tmp/$SLICER_NAME ]
+then
+    printf "Cannot /tmp/$SLICER_NAME\n"
+    exit 1
+fi
+
+printf "Installing /tmp/$SLICER_NAME\n"
+sudo dpkg -i /tmp/$SLICER_NAME && printf "done\n"
