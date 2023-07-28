@@ -1,0 +1,9 @@
+#! /usr/bin/env bash
+#
+# makes the caps lock another escape key
+# ubuntu
+#
+# P.T. Plew 2023
+
+setxkbmap -option caps:escape
+
