@@ -1,4 +1,10 @@
 #! /usr/bin/env bash
+# 
+# depends on jq and curl
+#
+# personal access token with repo rights must live in $HOME/.alloy_gh_token
+#
+# P.T. Plew 2023
 
 ENV_FILE=$HOME/.alloy_gh_token
 if [ ! -e $ENV_FILE ]
@@ -7,84 +13,42 @@ then
     exit 1
 fi
 
-TOKEN=$(cat $ENV_FILE)
-
-dpkg -l | grep -q slicer && slicer=true || slicer=false
-
-if $slicer
+read -r -p "Continuing will overwrite any installed slicer do you want to continue? y/[n]" response
+response=${response,,}    # tolower
+if [[ ! "$response" =~ ^(yes|y)$ ]]
 then
-    printf "Continuing will uninstall the slicer do you want to continue? y/n "
-    read uninstall
-
-    if [[ -z $uninstall && $uninstall != y ]]
-    then
-        printf "exiting.\n"
-        exit 2
-    fi
-
-    printf "Uninstalling slicer.\n\n"
-    sudo dpkg -r Slicer
-    printf "Uninstall successful.\n"
+    printf "exiting\n"
+    exit 1
 fi
+TOKEN=$(cat $ENV_FILE)
 
 
 printf "Reading response code please wait\n"
-# see if code has the right permissions
-CODE=$(curl \
-    -I -s \
-    --request GET\
-    --url "https://api.github.com/repos/alloy-enterprises/slicer/releases/latest" \
-    --header "Accept: application/vnd.github+json" \
-    --header "Authorization: Bearer $TOKEN" \
-    | head -n 1 | cut -d$' ' -f2)
-
+# see if access code has the right permissions
+CODE=$(curl -I -s --request GET --url "https://api.github.com/repos/alloy-enterprises/slicer/releases/latest" --header "Accept: application/vnd.github+json" --header "Authorization: Bearer $TOKEN" | head -n 1 | cut -d$' ' -f2)
 if [ $CODE != 200 ]
 then
-    curl \
-        --request GET \
-        --url "https://api.github.com/repos/alloy-enterprises/slicer/releases/latest" \
-        --header "Accept: application/vnd.github+json" \
-        --header "Authorization: Bearer $TOKEN" | jq -r '.message'
+    curl --request GET --url "https://api.github.com/repos/alloy-enterprises/slicer/releases/latest" --header "Accept: application/vnd.github+json" --header "Authorization: Bearer $TOKEN" | jq -r '.message'
 
     exit 1
+else
+    printf "Access Token 200:OK.\n"
 fi
-printf "Access Token OK.\n"
 
-RESPONSE=$(curl \
-    --silent \
-    --request GET \
-    --url "https://api.github.com/repos/alloy-enterprises/slicer/releases/latest" \
-    --header "Accept: application/vnd.github+json" \
-    --header "Authorization: Bearer $TOKEN")
-
+RESPONSE=$(curl --silent --request GET --url "https://api.github.com/repos/alloy-enterprises/slicer/releases/latest" --header "Accept: application/vnd.github+json" --header "Authorization: Bearer $TOKEN")
 ALL_ASSETS=$(jq -c '.assets[]' <<< $RESPONSE)
-
 for ASSET in $ALL_ASSETS
 do
-    name=$(jq -r '.name' <<< $ASSET)
-    url=$(jq -r '.url' <<< $ASSET)
+    CURRENT_NAME=$(jq -r '.name' <<< $ASSET)
+    CURRENT_URL=$(jq -r '.url' <<< $ASSET)
 
-    if [ $name = *.deb ]
+    if [ $CURRENT_NAME = *.deb ]
     then
-        SLICER_NAME=$name
-        printf "Downloading $name to /tmp/$name\n"
-
-        curl \
-            --location \
-            --progress-bar \
-            --output "/tmp/$name" \
-            --request GET \
-            --url $url \
-            --header "Accept: application/octet-stream" \
-            --header "Authorization: Bearer $TOKEN"
+        SLICER_NAME=$CURRENT_NAME
+        printf "Downloading $CURRENT_NAME to /tmp/$CURRENT_NAME\n"
+        curl --location --progress-bar --output "/tmp/$CURRENT_NAME" --request GET --url $CURRENT_URL --header "Accept: application/octet-stream" --header "Authorization: Bearer $TOKEN"
+        printf "Installing /tmp/$SLICER_NAME\n"
+        sudo dpkg -i /tmp/$SLICER_NAME && printf "done\n"
     fi
 done
 
-if [ ! -e /tmp/$SLICER_NAME ]
-then
-    printf "Cannot /tmp/$SLICER_NAME\n"
-    exit 1
-fi
-
-printf "Installing /tmp/$SLICER_NAME\n"
-sudo dpkg -i /tmp/$SLICER_NAME && printf "done\n"
